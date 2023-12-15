@@ -2,9 +2,16 @@ package main
 
 import (
 	netutils "netutils/netutils"
+	"os"
 
 	log "github.com/sirupsen/logrus"
 )
+
+func init() {
+	log.SetReportCaller(true)
+	log.SetOutput(os.Stdout)
+	log.SetLevel(log.InfoLevel)
+}
 
 func main() {
 	iface := "enp1s0"
@@ -33,7 +40,17 @@ func main() {
 	if checksv != nil {
 		log.Error("Can't not connect to ", svname)
 	} else {
-		log.Info("Server ", svname)
+		log.Info("Can connect to", svname)
 	}
 
+	ifacecheck := "enp1s0"
+	addr, duration, err := netutils.Ping("1.1.1.1", ifacecheck)
+	if err != nil {
+		log.Error(duration, err)
+	} else {
+		log.Info(addr.IP, duration, err)
+	}
+	if netutils.NetIsOnlinePing(5, 1, ifacecheck) {
+		log.Info(ifacecheck, " avaiable to connect to internet.")
+	}
 }

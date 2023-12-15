@@ -5,10 +5,13 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/net/icmp"
+	"golang.org/x/net/ipv4"
 )
 
 const (
@@ -36,6 +39,13 @@ var dnslist = []string{
 	//	"9.9.9.9", "149.112.112.112", //quad9
 	//	"64.6.64.6", "64.6.65.6"
 } // verisign
+
+const (
+	// Stolen from https://godoc.org/golang.org/x/net/internal/iana,
+	// can't import "internal" packages
+	ProtocolICMP = 1
+	//ProtocolIPv6ICMP = 58
+)
 
 /* Get first finded IPv4 address of Linux network interface. */
 func NetGetInterfaceIpv4Addr(interfaceName string) (addr string, err error) {
@@ -173,7 +183,6 @@ func NetCheckConectionToServer(domain string, ifacenames ...string) error {
 	}
 }
 
-
 /* Check if server is alive, timeout check is 666ms */
 func ServerIsLive(domain string, ifacenames ...string) bool {
 	tcpAddr := &net.TCPAddr{}
@@ -223,3 +232,161 @@ func ServerIsLive(domain string, ifacenames ...string) bool {
 	}
 }
 
+/* Check if host machine have internet (check http connection to DNS server ) */
+func NetIsOnlineTcp(times, intervalsecs int, ifacenames ...string) bool {
+	ifacename := ""
+	if len(ifacenames) != 0 {
+		ifacename = ifacenames[0]
+	}
+	//	timeout := time.Millisecond * 500
+	//	if sutils.StringContainsI(ifacename, "ppp") {
+	//		timeout = time.Millisecond * 3000
+	//	}
+	numDnsTest := len(dnslist)
+	//	if numDnsTest >= 4 {
+	//		numDnsTest = 4
+	//	}
+	ttk := time.NewTicker(time.Second * time.Duration(intervalsecs))
+	for i1 := 0; i1 < times; i1++ {
+		for i := 0; i < numDnsTest; i++ {
+			//			log.Warn("Ping interface ", ifacename, dnslist[i])
+			if ServerIsLive(dnslist[i], ifacename) {
+				return true
+			} else {
+				//				log.Errorf("Error to use iface %s to test dns server: %s\n", ifacename, dnslist[i])
+				continue
+			}
+		}
+		if times > 1 {
+			<-ttk.C
+		}
+	}
+	return false
+}
+
+/* Check if host machine have internet (check by ping(imcp) to dns servers) */
+func NetIsOnlinePing(times, intervalsecs int, ifacenames ...string) bool {
+	ifacename := ""
+	if len(ifacenames) != 0 {
+		ifacename = ifacenames[0]
+	}
+	timeout := time.Millisecond * 500
+	//	if sutils.StringContainsI(ifacename, "ppp") {
+	//		timeout = time.Millisecond * 3000
+	//	}
+	numDnsTest := len(dnslist)
+	//	if numDnsTest >= 4 {
+	//		numDnsTest = 4
+	//	}
+	ttk := time.NewTicker(time.Second * time.Duration(intervalsecs))
+	for i1 := 0; i1 < times; i1++ {
+		for i := 0; i < numDnsTest; i++ {
+			//			log.Warn("Ping interface ", ifacename)
+			if _, _, err := Ping(dnslist[i], ifacename, timeout); err != nil {
+				//				if sutils.StringContainsI(ifacename, "ppp") {
+				//				log.Errorf("Error to use iface %s to test dns server: %s\n%s\n", ifacename, dnslist[i], err.Error())
+				//				}
+				continue
+			} else {
+				//				log.Warnf("Use iface %s to test dns server: %s\n", ifacename, dnslist[i])
+				return true
+			}
+		}
+		if times > 1 {
+			<-ttk.C
+		}
+	}
+	return false
+}
+
+func Ping(addr, iface string, timeouts ...time.Duration) (*net.IPAddr, time.Duration, error) {
+	// Start listening for icmp replies
+	timeout := time.Millisecond * 1000
+	if len(timeouts) != 0 {
+		timeout = timeouts[0]
+	}
+	listenAddr := "0.0.0.0"
+	if len(iface) != 0 {
+		// if sutils.StringContainsI(iface, "ppp") {
+		//			defer sutils.TimeTrack(time.Now())
+		// }
+		if ip4, err := NetGetInterfaceIpv4Addr(iface); err == nil {
+			//			fmt.Printf("\nip's%s is %s\n", iface, ip4)
+			listenAddr = ip4
+		} else {
+			return nil, 0, fmt.Errorf("iface %s don't have ipv4 address.", iface)
+		}
+	}
+	//	c, err := icmp.ListenPacket("ip4:1991", listenAddr+":1991")
+	c := new(icmp.PacketConn)
+	var err error
+	c, err = icmp.ListenPacket("ip4:icmp", listenAddr)
+	/* 	if sutils.GOOS != "windows" {
+	   		c, err = icmp.ListenPacket("udp4", listenAddr)
+	   	} else {
+	   		c, err = icmp.ListenPacket("ip4:icmp", listenAddr)
+	   	} */
+
+	if err != nil {
+		return nil, 0, err
+	}
+	defer c.Close()
+
+	// Resolve any DNS (if used) and get the real IP of the target
+	dstip4, err := ResolverDomain2Ip4(addr)
+	if err != nil {
+		//		panic(err)
+		return nil, 0, err
+	}
+
+	dst, err := net.ResolveIPAddr("ip4", dstip4)
+	if err != nil {
+		//		panic(err)
+		return nil, 0, err
+	}
+	// Make a new ICMP message
+	m := icmp.Message{
+		Type: ipv4.ICMPTypeEcho, Code: 0,
+		Body: &icmp.Echo{
+			ID: os.Getpid() & 0xffff, Seq: 1, //<< uint(seq), // TODO
+			Data: []byte(""),
+		},
+	}
+	b, err := m.Marshal(nil)
+	if err != nil {
+		return dst, 0, err
+	}
+
+	// Send it
+	start := time.Now()
+	n, err := c.WriteTo(b, dst)
+	if err != nil {
+		return dst, 0, err
+	} else if n != len(b) {
+		return dst, 0, fmt.Errorf("got %v; want %v", n, len(b))
+	}
+
+	// Wait for a reply
+	reply := make([]byte, 1500)
+	err = c.SetReadDeadline(time.Now().Add(timeout))
+	if err != nil {
+		return dst, 0, err
+	}
+	n, peer, err := c.ReadFrom(reply)
+	if err != nil {
+		return dst, 0, err
+	}
+	duration := time.Since(start)
+
+	// Pack it up boys, we're done here
+	rm, err := icmp.ParseMessage(ProtocolICMP, reply[:n])
+	if err != nil {
+		return dst, 0, err
+	}
+	switch rm.Type {
+	case ipv4.ICMPTypeEchoReply:
+		return dst, duration, nil
+	default:
+		return dst, 0, fmt.Errorf("got %+v from %v; want echo reply", rm, peer)
+	}
+}
