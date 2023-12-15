@@ -31,9 +31,9 @@ func main() {
 	svname := "https://stgapi.smartocr.vn"
 	checksv := netutils.NetCheckConectionToServer(svname, "enp1s0")
 	if checksv != nil {
-		log.Error("Server ", svname, " is down.")
+		log.Error("Can't not connect to ", svname)
 	} else {
-		log.Info("Server ", svname, " is up.")
+		log.Info("Server ", svname)
 	}
 
 }

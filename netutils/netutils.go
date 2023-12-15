@@ -123,7 +123,7 @@ func ResolverDomain2Ip4(domain string, debugflag ...bool) (addr string, err erro
 /*
 	Check connection to http/https server
 
-return nil if check ok
+return nil if cant connect to server through interface
 */
 func NetCheckConectionToServer(domain string, ifacenames ...string) error {
 	tcpAddr := &net.TCPAddr{}
@@ -172,3 +172,54 @@ func NetCheckConectionToServer(domain string, ifacenames ...string) error {
 		return nil
 	}
 }
+
+
+/* Check if server is alive, timeout check is 666ms */
+func ServerIsLive(domain string, ifacenames ...string) bool {
+	tcpAddr := &net.TCPAddr{}
+
+	if len(ifacenames) != 0 {
+		ip4add, err := NetGetInterfaceIpv4Addr(ifacenames[0])
+		if err != nil || len(ip4add) == 0 {
+			return false
+		} else {
+			tcpAddr.IP = net.ParseIP(ip4add)
+		}
+	} else {
+		tcpAddr = nil
+	}
+
+	d := net.Dialer{LocalAddr: tcpAddr, Timeout: time.Millisecond * 666}
+
+	if !strings.Contains(domain, "://") {
+		domain = "http://" + domain
+	}
+	u, err := url.Parse(domain)
+	if err != nil {
+		return false
+	}
+	port := "80"
+	if u.Scheme == "https" {
+		port = "443"
+	}
+
+	host := u.Host
+	if thost, tport, _ := net.SplitHostPort(u.Host); len(thost) != 0 {
+		port = tport
+		host = thost
+	}
+	ip4, err := ResolverDomain2Ip4(host)
+	if err != nil {
+		//		log.Error(err, host)
+
+		return false
+	}
+	if conn, err := d.Dial("tcp", ip4+":"+port); err != nil {
+		//		log.Error(err)
+		return false
+	} else {
+		conn.Close()
+		return true
+	}
+}
+
