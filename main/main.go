@@ -1,8 +1,9 @@
 package main
 
 import (
-	netutils "netutils/netutils"
 	"os"
+
+	netutils "github.com/huntelaar112/netutils"
 
 	log "github.com/sirupsen/logrus"
 )
