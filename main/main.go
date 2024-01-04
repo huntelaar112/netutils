@@ -4,7 +4,6 @@ import (
 	"os"
 
 	netutils "github.com/huntelaar112/netutils"
-
 	log "github.com/sirupsen/logrus"
 )
 
