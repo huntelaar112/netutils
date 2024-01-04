@@ -44,7 +44,7 @@ func main() {
 	}
 
 	ifacecheck := "enp1s0"
-	addr, duration, err := netutils.Ping("1.1.1.1", ifacecheck)
+	addr, duration, err := netutils.Ping("192.168.100.177", ifacecheck)
 	if err != nil {
 		log.Error(duration, err)
 	} else {
