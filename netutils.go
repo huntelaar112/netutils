@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -46,6 +47,34 @@ const (
 	ProtocolICMP = 1
 	//ProtocolIPv6ICMP = 58
 )
+
+// list all real network iface, include ethernet, wlan, docker network
+func NetListAllRealIface() ([]string, error) {
+	cmd := exec.Command("ip", "link", "show")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		//("Error running ip command:", err)
+		return nil, err
+	}
+
+	// Parse the output to extract interface names
+	interfaceLines := strings.Split(string(output), "\n")
+	interfaces := make([]string, 0)
+
+	for _, line := range interfaceLines {
+		fields := strings.Fields(line)
+		if len(fields) >= 7 && fields[1] != "lo:" && !strings.Contains(fields[1], "veth") {
+			interfaces = append(interfaces, strings.TrimSuffix(fields[1], ":"))
+		}
+	}
+
+	// Print the list of network interfaces
+	//fmt.Println("Network Interfaces:")
+	//for _, iface := range interfaces {
+	//	fmt.Println(iface)
+	//}
+	return interfaces, err
+}
 
 /* Get first finded IPv4 address of Linux network interface. */
 func NetGetInterfaceIpv4Addr(interfaceName string) (addr string, err error) {
