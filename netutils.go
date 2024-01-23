@@ -8,9 +8,11 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
+	"github.com/sonnt85/mdns"
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
 )
@@ -418,4 +420,88 @@ func Ping(addr, iface string, timeouts ...time.Duration) (*net.IPAddr, time.Dura
 	default:
 		return dst, 0, fmt.Errorf("got %+v from %v; want echo reply", rm, peer)
 	}
+}
+
+// id is instance in mdns
+func NetInitDiscoveryServer(ipService interface{}, serviceport interface{}, id, serviceName string, info interface{}, ifaceName ...interface{}) (s *mdns.Server, err error) {
+
+	if len(serviceName) == 0 {
+		serviceName = "_signage._tcp"
+	}
+	//(instance, service, domain, hostName string, port int, ips []net.IP, txt []string)
+	service, err := mdns.NewMDNSService(id, serviceName, "", "", serviceport, ipService, info)
+
+	if err != nil {
+		log.Error("Cannot create config mdnsServer", err)
+		return nil, err
+	}
+	var iface *net.Interface
+
+	if len(ifaceName) != 0 {
+		switch v := ifaceName[0].(type) {
+		case string:
+			if ief, err := net.InterfaceByName(v); err == nil { // get interface
+				iface = ief
+			}
+		case net.Interface:
+			iface = &v
+		case *net.Interface:
+			iface = v
+		default:
+		}
+	}
+	// Create the mDNS server, defer shutdown
+	if s, err = mdns.NewServer(&mdns.Config{Zone: service, Iface: iface}); err != nil {
+		log.Error("Cannot start mdnsServer", err)
+		return nil, err
+	} else {
+		//		log.Print(s.Config.Zone.(*mdns.MDNSService).Port)
+		return s, nil
+	}
+	//	defer s.Shutdown()
+}
+
+func NetDiscoveryQueryServiceEntry(serviceName, domain string, timeout time.Duration, ifaceNames ...string) []*mdns.ServiceEntry {
+	serviceInfo := make([]*mdns.ServiceEntry, 0)
+	// Make a channel for results and start listening
+	entriesCh := make(chan *mdns.ServiceEntry, 16)
+	mutex := &sync.Mutex{}
+	go func() {
+		for entry := range entriesCh {
+			// fmt.Printf("Got new signage entry: %v\n", entry)
+			mutex.Lock()
+			serviceInfo = append(serviceInfo, entry)
+			mutex.Unlock()
+		}
+	}()
+
+	if len(serviceName) == 0 {
+		serviceName = "_signage._tcp"
+	}
+	params := mdns.DefaultParams(serviceName)
+	params.WantUnicastResponse = true
+	if len(ifaceNames) != 0 {
+		if ief, err := net.InterfaceByName(ifaceNames[0]); err == nil { // get interface
+			//			log.Info("NetDiscoveryQuery on interface ", ifaceNames[0])
+			params.Interface = ief
+		} else {
+			return serviceInfo
+		}
+	} else {
+		log.Error("NetDiscoveryQuery on default interface")
+	}
+	params.Domain = ""
+	params.Entries = entriesCh
+	if timeout == 0 {
+		timeout = time.Millisecond * 600
+	}
+	params.Timeout = timeout
+	params.Domain = domain
+	if err := mdns.Query(params); err != nil {
+		log.Error("mdns.Query err:", err)
+	}
+	// Start the lookup
+	//	mdns.Lookup("_signage._tcp", entriesCh)
+	close(entriesCh)
+	return serviceInfo
 }
